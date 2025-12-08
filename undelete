@@ -1,5 +1,32 @@
-Determine if a bank is deleted.
-If deleted, check to see if disc header is missing.
-If it's missing, copy it from the game partition
-add entry to NHCD, making sure it matches game (wii or gc) and size (1 layer or 2)
+#Determine if a bank is deleted.
+#If deleted, check to see if disc header is missing.
+#If it's missing, copy it from the game partition
+#add entry to NHCD, making sure it matches game (wii or gc) and size (1 layer or 2)
 
+#undeleted_yn=""
+nhcd=1610613248
+header_location=0
+bank=$2
+bank_type=""
+
+# determine the offset of the header entry specified by $2. 
+header_location=$(( (((bank-1)*512)+$nhcd) ))
+
+
+# put the value from the header into $header_location. This will be null if the bank is deleted 
+bank_type=$(dd if=$1 bs=1 skip=$header_location count=4 status=none | tr -d '\0\n')
+
+# if bank is deleted, $bank_type will be null
+if [[ -z "$bank_type" ]]; then
+	echo "This bank is deleted"
+	# check for disc header here. If it's missing, check further down the disc. Only test with unencrytped disc
+else
+	echo "This bank is not deleted"
+fi
+
+echo $header_location
+echo $bank
+echo $bank_type
+
+
+#undeleted_yn=$(dd if=$1 bs=1 skip=$nhcd count=4 status=none | tr -d '\0\n')
