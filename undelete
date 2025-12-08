@@ -8,6 +8,7 @@ nhcd=1610613248
 header_location=0
 bank=$2
 bank_type=""
+dual_layer=""
 
 # determine the offset of the header entry specified by $2. 
 header_location=$(( (((bank-1)*512)+$nhcd) ))
@@ -18,7 +19,14 @@ bank_type=$(dd if=$1 bs=1 skip=$header_location count=4 status=none | tr -d '\0\
 
 # if bank is deleted, $bank_type will be null
 if [[ -z "$bank_type" ]]; then
-	echo "This bank is deleted"
+     #This checks the previous partition to see if the current partition is part of a dual layer game
+   dual_layer=$(dd if=$1 bs=1 skip=$(( (header_location-512) )) count=4 status=none | tr -d '\0\n') 
+	if [[ "$dual_layer" == "NN2L" ]]; then
+		echo "Bank $bank is likely part of the dual layer disc in bank $(( (bank-1) ))."
+	else
+		echo "This bank is deleted"
+	fi
+
 	# check for disc header here. If it's missing, check further down the disc. Only test with unencrytped disc
 else
 	echo "This bank is not deleted"
