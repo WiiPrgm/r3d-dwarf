@@ -1,0 +1,5 @@
+Determine if a bank is deleted.
+If deleted, check to see if disc header is missing.
+If it's missing, copy it from the game partition
+add entry to NHCD, making sure it matches game (wii or gc) and size (1 layer or 2)
+
