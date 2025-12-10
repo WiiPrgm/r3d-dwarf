@@ -9,6 +9,7 @@ gamesize=""
 gcmagic=""
 wiimagic=""
 
+listbanks() {
 
 while (( bank <= 8 )); do
 
@@ -17,6 +18,8 @@ while (( bank <= 8 )); do
   wiimagic=$(xxd -s $(( offset+24 )) -l 4 -p $1)
   gcmagic=$(xxd -s $(( offset+28 )) -l 4 -p $1)
   gamesize=""
+  #firstpartoffset=$(( $(printf '%d\n' 0x$(xxd -s $(( offset+262176 )) -l 4 -p $1)) *4 ))
+  #secondpartoffset=$(( $(printf '%d\n' 0x$(xxd -s $(( offset+262184 )) -l 4 -p $1)) *4 ))
 
 #Read game type from NHCD header. This will be blank if entry is deleted
 	type=$(dd if=$1 bs=1 skip=$nhcd count=4 status=none | tr -d '\0\n')
@@ -78,9 +81,14 @@ fi
         echo "Bank "$bank":"
 	[[ -n "$currentbankid" ]] && echo "$currentbankid"
 	[[ -n "$currentbankname" ]] && echo "$currentbankname"
-	echo "$gamesize"
+	[[ -n "$gamesize" && "$gamesize" != "Gamecube Game" ]] && echo "$gamesize"
 	echo $gametype
-
+#	echo $offset
+#	echo $firstpartoffset
+#	echo $secondpartoffset
+#	echo "Data size start"
+#	xxd -s $(( offset+secondpartstart+700 )) -l 4 $1
+#	echo "Data size end"
 
 #increment vars for next loop
 	((bank++))
@@ -94,3 +102,105 @@ fi
   printf '\n'
   printf '\n'
 done
+
+}
+
+
+undelete(){
+#Determine if a bank is deleted.
+#If deleted, check to see if disc header is missing.
+#If it's missing, copy it from the game partition
+#add entry to NHCD, making sure it matches game (wii or gc) and size (1 layer or 2)
+
+
+nhcd=1610613248
+header_location=0
+bank=$2
+bank_type=""
+dual_layer=""
+deleted=0
+offset=$(( 1610617344+((bank-1)*4707319808) ))
+header_present=0
+
+# determine the offset of the header entry specified by $2. 
+header_location=$(( (((bank-1)*512)+$nhcd) ))
+
+wiimagic=$(xxd -s $(( offset+24 )) -l 4 -p $1)
+gcmagic=$(xxd -s $(( offset+28 )) -l 4 -p $1)
+
+# put the value from the header into $header_location. This will be null if the bank is deleted
+bank_type=$(dd if=$1 bs=1 skip=$header_location count=4 status=none | tr -d '\0\n')
+
+# if bank is deleted, $bank_type will be null
+if [[ -z "$bank_type" ]]; then
+     #This checks the previous partition to see if the current partition is part of a dual layer game
+   dual_layer=$(dd if=$1 bs=1 skip=$(( (header_location-512) )) count=4 status=none | tr -d '\0\n')
+	if [[ "$dual_layer" == "NN2L" ]]; then
+		echo "Bank $bank is likely part of the dual layer disc in bank $(( (bank-1) ))."
+		deleted=0
+	else
+		echo "This bank is deleted #extra line"
+		deleted=1
+	fi
+
+	# check for disc header here. If it's missing, check further down the disc. Only test with unencrytped disc
+	else
+	echo "This bank is not deleted #extra line"
+	deleted=0
+fi
+
+	# if bank is deleted ($deleted = 1), then check for a disc header
+
+	if [[ "$deleted" = 1 ]]; then
+		#check for presence of a disc header
+		header_present=$(dd if=$1 bs=512 skip=$offset count=1 status=none | strings)
+		if [[ -z "$header_present" ]]; then
+			echo "Header Missing. Cannot be restored by this version of r3d-dwarf."
+		elif [[ "$wiimagic" == "5d1c9ea3" && "$gcmagic" == "00000000" ]]; then
+			echo "Wii Game NHCD Header needs restored. Dual layer discs may cause an issue."
+		elif [[ "$gcmagic" == "c2339f3d" && "$wiimagic" == "00000000" ]]; then
+			echo "Gamecube Game NHCD Header needs restored."
+		else
+		echo "Error. Debug 3. Are you in the middle of a dual layer disc?"
+	fi
+
+
+
+
+
+echo $header_location
+echo $bank
+echo $bank_type "banktype"
+echo $wiimagic
+echo $gcmagic
+echo $offset
+
+#undeleted_yn=$(dd if=$1 bs=1 skip=$nhcd count=4 status=none | tr -d '\0\n')
+
+}
+
+
+case "$1" in
+    list|-l)
+        listbanks "$2"
+        ;;
+     restore|-r)
+        undelete "$2" "$3"
+        ;;
+  #  listall|-la)
+#	numlistall "$2"
+#	;;
+ #   extractall|-xa)
+#	bankextractall "$2"
+#	;;
+	help|--h|-h)
+	echo This is a VERY beta tool for analyzing RVT H HDDs.
+	echo use $0 -l to list banks. This will struggle with deleted 2 layer banks and with missing disc headers.
+	exit 1
+	;;
+
+	*)
+        echo run $0 -h for usage instructions
+        exit 1
+        ;;
+esac
