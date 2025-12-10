@@ -154,16 +154,16 @@ fi
 	if [[ "$deleted" = 1 ]]; then
 		#check for presence of a disc header
 		header_present=$(dd if=$1 bs=512 skip=$offset count=1 status=none | strings)
-		if [[ -z "$header_present" ]]; then
-			echo "Header Missing. Cannot be restored by this version of r3d-dwarf."
-		elif [[ "$wiimagic" == "5d1c9ea3" && "$gcmagic" == "00000000" ]]; then
+#		if [[ -z "$header_present" ]]; then
+#			echo "Header Missing. Cannot be restored by this version of r3d-dwarf."
+		if [[ "$wiimagic" == "5d1c9ea3" && "$gcmagic" == "00000000" ]]; then
 			echo "Wii Game NHCD Header needs restored. Dual layer discs may cause an issue."
 		elif [[ "$gcmagic" == "c2339f3d" && "$wiimagic" == "00000000" ]]; then
 			echo "Gamecube Game NHCD Header needs restored."
 		else
 		echo "Error. Debug 3. Are you in the middle of a dual layer disc?"
 	fi
-
+fi
 
 
 
