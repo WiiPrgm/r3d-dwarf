@@ -3,13 +3,13 @@ offset=1610617344
 bank=1
 nhcd=1610613248
 type=""
-header_present=""
 currentbankid=""
 currentbankname=""
 gamesize=""
 gcmagic=""
 wiimagic=""
 
+listbanks() {
 
 while (( bank <= 8 )); do
 
@@ -18,35 +18,33 @@ while (( bank <= 8 )); do
   wiimagic=$(xxd -s $(( offset+24 )) -l 4 -p $1)
   gcmagic=$(xxd -s $(( offset+28 )) -l 4 -p $1)
   gamesize=""
+  #firstpartoffset=$(( $(printf '%d\n' 0x$(xxd -s $(( offset+262176 )) -l 4 -p $1)) *4 ))
+  #secondpartoffset=$(( $(printf '%d\n' 0x$(xxd -s $(( offset+262184 )) -l 4 -p $1)) *4 ))
 
 #Read game type from NHCD header. This will be blank if entry is deleted
 	type=$(dd if=$1 bs=1 skip=$nhcd count=4 status=none | tr -d '\0\n')
 #Determine game size based on NHCD header entry
 
-	if [[ "$type" == "NN1L" ]]; then
-		gamesize="Single Layer"
-	elif [[ "$type" == "GC1L" ]]; then
-		gamesize="Gamecube Game"
-	elif [[ "$type" == "NN2L" ]]; then
-		gamesize="Dual Layer"
-
-#increment vars since dual layer games take up two banks
-		offset=$((offset+4707319808))
-		((bank++))
-		nhcd=$((nhcd+512))
-	else
-		gamesize="Deleted Bank"
-		type="Deleted"
-	fi
-
-	#offset=$((offset+4707319808))
+	case "$type" in
+		NN1L) gamesize="Single Layer" ;;
+		GC1L) gamesize="Gamecube Game" ;;
+		NN2L) gamesize="Dual Layer"
+			offset=$((offset+4707319808))
+			((bank++))
+			nhcd=$((nhcd+512))
+    			;;
+		""|*) gamesize="Deleted Bank"
+			type="Deleted"
+    			;;
+	esac
 
 #displays stats if vars aren't empty.
+#this was moved to the end
 
-	echo "Bank "$bank":"
-	[[ -n "$currentbankid" ]] && echo "$currentbankid"
-	[[ -n "$currentbankname" ]] && echo "$currentbankname"
-	#echo "$gamesize"; gamesize=""
+#	echo "Bank "$bank":"
+#	[[ -n "$currentbankid" ]] && echo "$currentbankid"
+#	[[ -n "$currentbankname" ]] && echo "$currentbankname"
+#	#echo "$gamesize"; gamesize=""
 
 
 #check game type against magic word in disc image
@@ -80,7 +78,17 @@ while (( bank <= 8 )); do
 
 fi
 
-echo $gametype
+        echo "Bank "$bank":"
+	[[ -n "$currentbankid" ]] && echo "$currentbankid"
+	[[ -n "$currentbankname" ]] && echo "$currentbankname"
+	[[ -n "$gamesize" && "$gamesize" != "Gamecube Game" ]] && echo "$gamesize"
+	echo $gametype
+#	echo $offset
+#	echo $firstpartoffset
+#	echo $secondpartoffset
+#	echo "Data size start"
+#	xxd -s $(( offset+secondpartstart+700 )) -l 4 $1
+#	echo "Data size end"
 
 #increment vars for next loop
 	((bank++))
@@ -89,8 +97,41 @@ echo $gametype
 #clear vars
 	wiimagic=""
 	gcmagic=""
-	header_present=""
+	gamesize=""
 
   printf '\n'
   printf '\n'
 done
+
+}
+
+
+undelete(){
+	
+
+
+
+case "$1" in
+    list|-l)
+        listbanks "$2"
+        ;;
+#    extract|-x)
+#        bankextract "$2" "$3"
+ #       ;;
+  #  listall|-la)
+#	numlistall "$2"
+#	;;
+ #   extractall|-xa)
+#	bankextractall "$2"
+#	;;
+	help|--h|-h)
+	echo This is a VERY beta tool for analyzing RVT H HDDs.
+	echo use $0 -l to list banks. This will struggle with deleted 2 layer banks and with missing disc headers.
+	exit 1
+	;;
+
+	*)
+        echo run $0 -h for usage instructions
+        exit 1
+        ;;
+esac
