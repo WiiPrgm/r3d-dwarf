@@ -1,3 +1,12 @@
+#check if magic is present at $bank
+#if yes, check for magic in the next bank
+#if no magic found, put entire 16k (check on this) header area for next bank in a variable
+#check if variable is empty
+#if variable is empty, it's likely the start of a new bank, so current bank is a single layer
+
+
+
+
 #
 offset=1610617344
 bank=1
@@ -13,17 +22,31 @@ listbanks() {
 
 while (( bank <= 8 )); do
 
-  currentbankid=$(dd if=$1 bs=1 skip=$offset count=6 status=none | strings)
-  currentbankname=$(dd if=$1 bs=1 skip=$(( offset+6 )) count=64 status=none | strings | sed 's/^=//')
-  wiimagic=$(xxd -s $(( offset+24 )) -l 4 -p $1)
-  gcmagic=$(xxd -s $(( offset+28 )) -l 4 -p $1)
+  currentbankid=$(dd if="$1" bs=1 skip=$offset count=6 status=none | strings)
+  currentbankname=$(dd if="$1" bs=1 skip=$(( offset+6 )) count=64 status=none | strings | sed 's/^=//')
+  wiimagic=$(xxd -s $(( offset+24 )) -l 4 -p "$1")
+#  secondpartdatastart=$(( $(printf '%d\n' 0x$(xxd -s $(( offset+secondpartoffset+696 )) -l 4 -p $1)) *4 ))
+#  second_wiimagic=$(xxd -s $(( secondpartdatastart + 28 )) -l 4 -p $1)
+  gcmagic=$(xxd -s $(( offset+28 )) -l 4 -p "$1")
   gamesize=""
-  #firstpartoffset=$(( $(printf '%d\n' 0x$(xxd -s $(( offset+262176 )) -l 4 -p $1)) *4 ))
-  #secondpartoffset=$(( $(printf '%d\n' 0x$(xxd -s $(( offset+262184 )) -l 4 -p $1)) *4 ))
 
+  firstpartoffset=$(( $(printf '%d\n' 0x$(xxd -s $(( offset+262176 )) -l 4 -p "$1")) *4 ))
+  secondpartoffset=$(( $(printf '%d\n' 0x$(xxd -s $(( offset+262184 )) -l 4 -p "$1")) *4 ))
+secondpartdatastart=$(( $(printf '%d\n' 0x$(xxd -s $(( offset+secondpartoffset+696 )) -l 4 -p "$1")) *4 ))
+  unenc_bankstart=$(( offset+secondpartoffset+secondpartdatastart ))
+  second_wiimagic=$(xxd -s $(( unenc_bankstart + 24 )) -l 4 -p "$1")
+  enc_check=""
+#part_size=$(( $(printf '%d\n' 0x$(xxd -s $(( secondpartoffset+700 )) -l 4 -p $1)) *4 ))
 #Read game type from NHCD header. This will be blank if entry is deleted
 	type=$(dd if=$1 bs=1 skip=$nhcd count=4 status=none | tr -d '\0\n')
 #Determine game size based on NHCD header entry
+#echo "check for wii magic"
+#echo $offset
+#echo $secondpartoffset
+#echo $secondpartdatastart "2nd part data start"
+#echo $(( offset+secondpartoffset+secondpartdatastart ))
+#echo $second_wiimagic
+#echo "stop magic"
 
 	case "$type" in
 		NN1L) gamesize="Single Layer" ;;
@@ -51,7 +74,9 @@ while (( bank <= 8 )); do
 	if [[ "$wiimagic" == "5d1c9ea3" && "$gcmagic" == "00000000" ]]; then
 		if [[ $type == NN* ]]; then
 			gametype="Wii Game"
-			#echo $type
+		#echo "$offset"
+		#echo "$secondpartoffset"
+		#echo $type
 		elif [[ "$type"="Deleted" ]]; then
 			gametype="Deleted Wii Game with header. (Easy to recover.)"
 		elif [[ $type == GC* ]]; then
@@ -72,7 +97,15 @@ while (( bank <= 8 )); do
 		fi
 	elif [[ "$gcmagic" == "00000000" && "$wiimagic" == "00000000" && "$type" == "Deleted" ]]; then
 		gametype="ERROR. NHCD entry is blank and disc header is missing."
-	#add logic if there are no magic words and no header entry. try to check for presence of a disc
+			if [[ "$second_wiimagic" == "5d1c9ea3" ]]; then
+				enc_check="Disc is unencrypted. Disc header can be easily restored."
+				currentbankid=$(dd if="$1" bs=1 skip="$unenc_bankstart" count=6 status=none | strings)
+				currentbankname=$(dd if="$1" bs=1 skip=$(( unenc_bankstart+6 )) count=64 status=none | strings | sed 's/^=//')
+			else
+				enc_check="Disc type unknown. Unable to restore at this time."
+			fi
+
+#add logic if there are no magic words and no header entry. try to check for presence of a disc
 	else
 		gametype="Garbage Data Detected. This might be the second partiton of a deleted dual layer game."
 
@@ -83,11 +116,16 @@ fi
 	[[ -n "$currentbankname" ]] && echo "$currentbankname"
 	[[ -n "$gamesize" && "$gamesize" != "Gamecube Game" ]] && echo "$gamesize"
 	echo $gametype
+	[[ -n "$enc_check" ]] && echo "$enc_check"
+#	echo $second_wiimagic
 #	echo $offset
 #	echo $firstpartoffset
 #	echo $secondpartoffset
 #	echo "Data size start"
-#	xxd -s $(( offset+secondpartstart+700 )) -l 4 $1
+#	echo "$unenc_bankstart"
+#	echo $(( offset + secondpartoffset + 700 ))
+#	xxd -s $(( offset + secondpartoffset + 700 )) -l 4 "$1"
+#	xxd -s $(( offset + secondpartoffset + 1200 )) -l 4 "$1"
 #	echo "Data size end"
 
 #increment vars for next loop
@@ -98,7 +136,7 @@ fi
 	wiimagic=""
 	gcmagic=""
 	gamesize=""
-
+	type=""
   printf '\n'
   printf '\n'
 done
