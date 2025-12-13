@@ -17,12 +17,12 @@ wii_dual_layer=15597568 #bs=512
 gc_size=2865856 #bs=512
 # determine the offset of the header entry specified by $2.
 header_location=$(( (((bank-1)*512)+$nhcd) )) #bs=1
-hiddenbankname="$(dd if="$1" bs=1 count=64 skip=8 status=none | strings)"
+hiddenbankname="$(dd if=$1 bs=1 count=64 skip=8 status=none | strings)"
 
 if [[ "$bank" -eq 0 ]]; then
 	echo "Extracting hidden ban: "$hiddenbankname""
 	echo "Assuming single layer..."
-	dd if="$1" of="$hiddenbankname"".""$1".iso bs=512 skip=0 count="$wii_single_layer"
+	dd if="$1" of="$hiddenbankname".iso bs=512 skip=0 count="$wii_single_layer"
 	exit 0
 fi
 
