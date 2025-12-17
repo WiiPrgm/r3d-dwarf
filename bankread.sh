@@ -28,13 +28,15 @@ while (( bank <= 8 )); do
 #  secondpartdatastart=$(( $(printf '%d\n' 0x$(xxd -s $(( offset+secondpartoffset+696 )) -l 4 -p $1)) *4 ))
 #  second_wiimagic=$(xxd -s $(( secondpartdatastart + 28 )) -l 4 -p $1)
   gcmagic=$(xxd -s $(( offset+28 )) -l 4 -p "$1")
+  is_dual_layer=""
   gamesize=""
-
+  crypt=""
+  cryptprobe=$(dd if="$1" bs=1 skip=$(( $offset+96 )) count=4 status=none | tr -d '\0\n' | xxd -p)
   firstpartoffset=$(( $(printf '%d\n' 0x$(xxd -s $(( offset+262176 )) -l 4 -p "$1")) *4 ))
   secondpartoffset=$(( $(printf '%d\n' 0x$(xxd -s $(( offset+262184 )) -l 4 -p "$1")) *4 ))
 secondpartdatastart=$(( $(printf '%d\n' 0x$(xxd -s $(( offset+secondpartoffset+696 )) -l 4 -p "$1")) *4 ))
   unenc_bankstart=$(( offset+secondpartoffset+secondpartdatastart ))
-  second_wiimagic=$(xxd -s $(( unenc_bankstart + 24 )) -l 4 -p "$1")
+second_wiimagic=$(xxd -s $(( unenc_bankstart + 24 )) -l 4 -p "$1")
   enc_check=""
 #part_size=$(( $(printf '%d\n' 0x$(xxd -s $(( secondpartoffset+700 )) -l 4 -p $1)) *4 ))
 #Read game type from NHCD header. This will be blank if entry is deleted
@@ -53,7 +55,7 @@ secondpartdatastart=$(( $(printf '%d\n' 0x$(xxd -s $(( offset+secondpartoffset+6
 		GC1L) gamesize="Gamecube Game" ;;
 		NN2L) gamesize="Dual Layer"
 			offset=$((offset+4707319808))
-			((bank++))
+			is_dual_layer=1
 			nhcd=$((nhcd+512))
     			;;
 		""|*) gamesize="Deleted Bank"
@@ -108,19 +110,30 @@ secondpartdatastart=$(( $(printf '%d\n' 0x$(xxd -s $(( offset+secondpartoffset+6
 #add logic if there are no magic words and no header entry. try to check for presence of a disc
 	else
 		gametype="Garbage Data Detected. This might be the second partiton of a deleted dual layer game."
-
+		currentbankid=""
+		currentbankname=""
 fi
+
+#encryption type
+	if [[ "$cryptprobe" == "0101" ]]; then
+		crypt="Unencrypted"
+	else
+		crypt=""
+	fi
+
 
         echo "Bank "$bank":"
 	[[ -n "$currentbankid" ]] && echo "$currentbankid"
 	[[ -n "$currentbankname" ]] && echo "$currentbankname"
 	[[ -n "$gamesize" && "$gamesize" != "Gamecube Game" ]] && echo "$gamesize"
+	[[ -n "$crypt" ]] && echo "$crypt"
 	echo $gametype
 	[[ -n "$enc_check" ]] && echo "$enc_check"
 #	echo $second_wiimagic
-#	echo $offset
+	echo $offset "hex absolute offset"
 #	echo $firstpartoffset
-#	echo $secondpartoffset
+	echo "2nd part offset"
+	echo $secondpartoffset
 #	echo "Data size start"
 #	echo "$unenc_bankstart"
 #	echo $(( offset + secondpartoffset + 700 ))
@@ -130,6 +143,9 @@ fi
 
 #increment vars for next loop
 	((bank++))
+		if [[ -n "$is_dual_layer" ]]; then
+    			((bank++))
+		fi
 	nhcd=$((nhcd+512))
 	offset=$((offset+4707319808))
 #clear vars
@@ -158,53 +174,153 @@ bank_type=""
 dual_layer=""
 deleted=0
 offset=$(( 1610617344+((bank-1)*4707319808) ))
-header_present=0
+next_bank_offset=$(( 1610617344+((bank)*4707319808) ))
 
-# determine the offset of the header entry specified by $2. 
+header_present=0
+secondpartoffset=$(( $(printf '%d\n' 0x$(xxd -s $(( offset+262184 )) -l 4 -p "$1")) *4 ))
+secondpartdatastart=$(( $(printf '%d\n' 0x$(xxd -s $(( offset+secondpartoffset+696 )) -l 4 -p "$1")) *4 ))
+unenc_bankstart=$(( offset+secondpartoffset+secondpartdatastart ))
+cert_check=$(dd if="$1" bs=1 skip=$(( offset+secondpartoffset+320 )) count=4 status=none | tr -d '/0/n' )
+cryptprobe=$(dd if="$1" bs=1 skip=$(( $offset+96 )) count=4 status=none | tr -d '\0\n' | xxd -p)
+
+second_wiimagic=$(xxd -s $(( unenc_bankstart + 24 )) -l 4 -p "$1")
+needs_disc_header=0
+
+# determine the offset of the header entry specified by $2.
 header_location=$(( (((bank-1)*512)+$nhcd) ))
 
 wiimagic=$(xxd -s $(( offset+24 )) -l 4 -p $1)
 gcmagic=$(xxd -s $(( offset+28 )) -l 4 -p $1)
+next_bank_wiimagic=$(xxd -s $(( next_bank_offset+24 )) -l 4 -p $1)
+next_bank_gcmagic=$(xxd -s $(( next_bank_offset+28 )) -l 4 -p $1)
+
+
+no_nhcd_header=0
+no_disc_header=0
+is_encrypted=1
 
 # put the value from the header into $header_location. This will be null if the bank is deleted
 bank_type=$(dd if=$1 bs=1 skip=$header_location count=4 status=none | tr -d '\0\n')
+
+echo "$cert_check" "cert"
+
+#Step 1. Check to see if bank is actually deleted.
 
 # if bank is deleted, $bank_type will be null
 if [[ -z "$bank_type" ]]; then
      #This checks the previous partition to see if the current partition is part of a dual layer game
    dual_layer=$(dd if=$1 bs=1 skip=$(( (header_location-512) )) count=4 status=none | tr -d '\0\n')
 	if [[ "$dual_layer" == "NN2L" ]]; then
-		echo "Bank $bank is likely part of the dual layer disc in bank $(( (bank-1) ))."
-		deleted=0
+		echo "Bank $bank is likely part of the dual layer disc in bank $(( (bank-1) )) and does not need restored"
+		exit 0
 	else
-		echo "This bank is deleted #extra line"
 		deleted=1
+		no_nhcd_header=1
 	fi
 
 	# check for disc header here. If it's missing, check further down the disc. Only test with unencrytped disc
 	else
-	echo "This bank is not deleted #extra line"
-	deleted=0
+		echo "This bank is not deleted and does not need restored."
+		exit 0
 fi
 
-	# if bank is deleted ($deleted = 1), then check for a disc header
+#Step 2. Check to see if the disc at $bank is wii or gamecube, or if the disc header was blanked.
+
 
 	if [[ "$deleted" = 1 ]]; then
-		#check for presence of a disc header
-		header_present=$(dd if=$1 bs=512 skip=$offset count=1 status=none | strings)
-#		if [[ -z "$header_present" ]]; then
-#			echo "Header Missing. Cannot be restored by this version of r3d-dwarf."
 		if [[ "$wiimagic" == "5d1c9ea3" && "$gcmagic" == "00000000" ]]; then
-			echo "Wii Game NHCD Header needs restored. Dual layer discs may cause an issue."
+			echo "Wii Game NHCD Header needs restored."
+			no_disc_header=0
+			wii=1
 		elif [[ "$gcmagic" == "c2339f3d" && "$wiimagic" == "00000000" ]]; then
 			echo "Gamecube Game NHCD Header needs restored."
+			no_disc_header=0
+			gamecube=1
+			disc_layer_guess="GC1L"
+			hex_size="002bbac0"
+		elif [[ "$gcmagic" == "00000000" && "$wiimagic" == "00000000" ]]; then
+		#	echo "Error. Debug 3. NHCD Missing and no disc header?"
+				if [[ "$second_wiimagic" == "5d1c9ea3" ]]; then
+					echo "Disc header missing. To restore, copy header from unencrypted wii partition"
+					unenc_wii=1
+				elif [[ "$cert_check" == "Root" ]]; then
+					echo "Disc header missing. To restore, copy header from encrypted partition"
+					enc_wii=1
+				else
+					echo "Error. Possible Gamecube game with empty header detected. Cannot be recovered by this version of r3d-dwarf."
+				fi
 		else
-		echo "Error. Debug 3. Are you in the middle of a dual layer disc?"
+			echo "Error. No recoverable data found."
+			junk_data=1
+		fi
 	fi
-fi
+
+
+#check for presence of unencrypted header or encrypted TMD if no header is found.
+
+#	if [[ "$no_disc_header" == "1" ]]; then
+#		if [[ "$second_wiimagic" == "5d1c9ea3" ]]; then
+#			echo "To restore, copy header from unencrypted wii partition"
+#			unenc_wii=1
+#		else
+#		if [[ "$cert_check" == "Root" ]]; then
+#			echo "To restore, copy header from encrypted partition"
+#			enc_wii=1
+#		fi
+#	fi
+
+#if unenc_wii=1. copy header from start of disc
+
+#check the next bank for Wii and GC magic (or zeros, indicating a deleted bank)
+
+		if [[ "$next_bank_wiimagic" == "5d1c9ea3" || "$next_bank_gcmagic" == "c2339f3d" || ("$next_bank_gcmagic" == "00000000" && "$next_bank_wiimagic" == "00000000") ]]; then
+			echo "Current bank is likely single layer."
+			disc_layer_guess=NN1L
+			hex_size="008c4a00"
+		else
+			echo "No valid data in next bank. Assuming dual layer."
+			disc_layer_guess=NN2L
+			hex_size="00ee0000"
+		fi
+#parts of nhcd header:
+#1. gametype (gc, nn1l, nn2l)       4 bytes
+#2. 14 zeros
+#3. 14 char ascii timestamp
+#4. staring lba <based on banknum
+#5. length (based on 1l 2l or gc
+#6 meaningless empty bytes to next bank entry
+
+hexoffset=$(( 3145737+$(( 9193984*($bank-1) )) ))
 
 
 
+pad="00000000000000"
+date="$(date +%Y%m%d%H%M%S)"
+
+printf '%s' "$disc_layer_guess""$pad""$date"
+#| dd of=$1 bs=1 seek=$nhcd conv=notrunc status=none
+
+printf '\n'
+
+#printf '%08x\n' "$hexoffset"
+
+
+
+
+echo "hex offset"
+printf '%08x' "$hexoffset" #| xxd -r -p #| dd of=$1 bs=1 seek=$(( nhcd+20 )) conv=notrunc status=none
+echo "hex size"
+printf '%s\n' "$hex_size" #| xxd -r -p #| dd of=$1 bs=1 seek=$(( nhcd+24 )) conv=notrunc status=none
+
+#	if [[ "$no_disc_header" = 0 && "$wii" = 1 ]]; then
+#		#printf stuff | dd
+#
+#		$(( date +"%Y%m%d%H%M%S" )) + "000000000000000000" + 
+#
+#	elif [[ "$no_disc_header" = 0 && "$gamecube" = 1 ]]l then
+#		#printf other stuff | dd
+#	fi
+#	fi
 
 echo $header_location
 echo $bank
@@ -221,7 +337,7 @@ echo $offset
 case "$1" in
     list|-l)
         listbanks "$2"
-        ;;
+/        ;;
      restore|-r)
         undelete "$2" "$3"
         ;;
