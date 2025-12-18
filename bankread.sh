@@ -177,10 +177,10 @@ offset=$(( 1610617344+((bank-1)*4707319808) ))
 next_bank_offset=$(( 1610617344+((bank)*4707319808) ))
 
 header_present=0
-secondpartoffset=$(( $(printf '%d\n' 0x$(xxd -s $(( offset+262184 )) -l 4 -p "$1")) *4 ))
-secondpartdatastart=$(( $(printf '%d\n' 0x$(xxd -s $(( offset+secondpartoffset+696 )) -l 4 -p "$1")) *4 ))
+secondpartoffset=$(( 0x$(xxd -s $(( offset+262184 )) -l 4 -p "$1") *4 ))
+secondpartdatastart=$(( 0x$(xxd -s $(( offset+secondpartoffset+696 )) -l 4 -p "$1" 2> /dev/null) *4 ))
 unenc_bankstart=$(( offset+secondpartoffset+secondpartdatastart ))
-cert_check=$(dd if="$1" bs=1 skip=$(( offset+secondpartoffset+320 )) count=4 status=none | tr -d '/0/n' )
+cert_check=$(dd if="$1" bs=1 skip=$(( offset+secondpartoffset+320 )) count=4 status=none | tr -d '\0\n' )
 cryptprobe=$(dd if="$1" bs=1 skip=$(( $offset+96 )) count=4 status=none | tr -d '\0\n' | xxd -p)
 
 second_wiimagic=$(xxd -s $(( unenc_bankstart + 24 )) -l 4 -p "$1")
@@ -230,16 +230,15 @@ fi
 	if [[ "$deleted" = 1 ]]; then
 		if [[ "$wiimagic" == "5d1c9ea3" && "$gcmagic" == "00000000" ]]; then
 			echo "Wii Game NHCD Header needs restored."
-			no_disc_header=0
-			wii=1
+			#wii=1
 		elif [[ "$gcmagic" == "c2339f3d" && "$wiimagic" == "00000000" ]]; then
 			echo "Gamecube Game NHCD Header needs restored."
-			no_disc_header=0
-			gamecube=1
+			#gamecube=1
 			disc_layer_guess="GC1L"
 			hex_size="002bbac0"
 		elif [[ "$gcmagic" == "00000000" && "$wiimagic" == "00000000" ]]; then
 		#	echo "Error. Debug 3. NHCD Missing and no disc header?"
+				no_disc_header=1
 				if [[ "$second_wiimagic" == "5d1c9ea3" ]]; then
 					echo "Disc header missing. To restore, copy header from unencrypted wii partition"
 					unenc_wii=1
@@ -252,6 +251,7 @@ fi
 		else
 			echo "Error. No recoverable data found."
 			junk_data=1
+			exit 1
 		fi
 	fi
 
@@ -272,7 +272,8 @@ fi
 #if unenc_wii=1. copy header from start of disc
 
 #check the next bank for Wii and GC magic (or zeros, indicating a deleted bank)
-
+	if [[ "$disc_layer_guess" != "GC1L" ]]; then
+		echo "$disc_layer_guess"
 		if [[ "$next_bank_wiimagic" == "5d1c9ea3" || "$next_bank_gcmagic" == "c2339f3d" || ("$next_bank_gcmagic" == "00000000" && "$next_bank_wiimagic" == "00000000") ]]; then
 			echo "Current bank is likely single layer."
 			disc_layer_guess=NN1L
@@ -282,6 +283,8 @@ fi
 			disc_layer_guess=NN2L
 			hex_size="00ee0000"
 		fi
+	fi
+
 #parts of nhcd header:
 #1. gametype (gc, nn1l, nn2l)       4 bytes
 #2. 14 zeros
@@ -292,26 +295,19 @@ fi
 
 hexoffset=$(( 3145737+$(( 9193984*($bank-1) )) ))
 
-
-
 pad="00000000000000"
 date="$(date +%Y%m%d%H%M%S)"
 
-printf '%s' "$disc_layer_guess""$pad""$date"
-#| dd of=$1 bs=1 seek=$nhcd conv=notrunc status=none
+	if [[ "$no_nhcd_header" = "1" ]]; then
 
-printf '\n'
+		printf '%s' "$disc_layer_guess""$pad""$date" #| dd of=$1 bs=1 seek=$nhcd conv=notrunc status=none
 
-#printf '%08x\n' "$hexoffset"
+		echo "hex offset"
+		printf '%08x' "$hexoffset" #| xxd -r -p #| dd of=$1 bs=1 seek=$(( nhcd+20 )) conv=notrunc status=none
+		echo "hex size"
+		printf '%s\n' "$hex_size" #| xxd -r -p #| dd of=$1 bs=1 seek=$(( nhcd+24 )) conv=notrunc status=none
 
-
-
-
-echo "hex offset"
-printf '%08x' "$hexoffset" #| xxd -r -p #| dd of=$1 bs=1 seek=$(( nhcd+20 )) conv=notrunc status=none
-echo "hex size"
-printf '%s\n' "$hex_size" #| xxd -r -p #| dd of=$1 bs=1 seek=$(( nhcd+24 )) conv=notrunc status=none
-
+	fi
 #	if [[ "$no_disc_header" = 0 && "$wii" = 1 ]]; then
 #		#printf stuff | dd
 #
